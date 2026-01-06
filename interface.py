@@ -23,6 +23,7 @@ class Window(QMainWindow, Ui_MainWindow):
         self.eventRunning = Event()
 
         self.member_list = []
+        self._list_view_connected = False  # 防止重复绑定信号
 
         self.received.connect(self.get_data)
         self.isLogin = False
@@ -42,10 +43,15 @@ class Window(QMainWindow, Ui_MainWindow):
         self.action_help.triggered.connect(self.show_help_win)
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        """窗口关闭事件，清理资源"""
+        # 停止识别线程
+        self.eventRunning.clear()
+        self.app.identify.break_loop()
+        # 停止网络
         self.app.client.stop_ping()
+        a0.accept()
 
     def join(self):
-        # self.app.client.send(self.app.client.type)
         self.name = self.lineEdit.text()
         if self.name != '':
             self.app.client.send(self.name)  # 发送用户名
@@ -62,7 +68,6 @@ class Window(QMainWindow, Ui_MainWindow):
         if self.isLogin:
             if self.isController:
                 self.app.client.send("exchange_control")
-                # self.isController = False
                 self.btn_get_ctrl.setText("获取控制")
                 self.btn_pause.setText("开始控制")
             else:
@@ -82,10 +87,7 @@ class Window(QMainWindow, Ui_MainWindow):
             self.show_error("未获得控制权")
 
     def switch_target(self):
-        if self.checkBox.isChecked():
-            self.isTarget = True
-        else:
-            self.isTarget = False
+        self.isTarget = self.checkBox.isChecked()
 
     def get_data(self, data: str):
         if data == 'pong':
@@ -93,30 +95,41 @@ class Window(QMainWindow, Ui_MainWindow):
         elif data == 'ping':
             self.app.client.timer.start()
             return
+        
         splits = data.split(' ')
+        if not splits:
+            return
+            
         if splits[0] == 'command':
-            self.set_log("控制者发出指令：" + splits[1])
-            if self.isTarget:
-                # 响应指令：pyuserinput
-                self.reaction.react(splits[1])
+            if len(splits) > 1:
+                self.set_log("控制者发出指令：" + splits[1])
+                if self.isTarget:
+                    self.reaction.react(splits[1])
 
         elif splits[0] == 'change_controller':
             self.isControlling = False
-            self.label_controller.setText(("正在控制：" if self.isControlling else "控制已暂停：")
-                                          + splits[1])
-            if splits[1] == self.name:
+            controller_name = splits[1] if len(splits) > 1 else ''
+            self.label_controller.setText(
+                ("正在控制：" if self.isControlling else "控制已暂停：") + controller_name
+            )
+            if controller_name == self.name:
                 self.isController = True
                 self.btn_get_ctrl.setText("退出控制")
             else:
                 self.isController = False
                 self.btn_get_ctrl.setText("获取控制")
+                
         elif splits[0] == 'control_switched':
             self.isControlling = not self.isControlling
-            self.label_controller.setText(("正在控制：" if self.isControlling else "控制已暂停：")
-                                          + splits[1])
+            controller_name = splits[1] if len(splits) > 1 else ''
+            self.label_controller.setText(
+                ("正在控制：" if self.isControlling else "控制已暂停：") + controller_name
+            )
+            
         elif splits[0] == 'member_list':
             self.member_list = splits[1:]
             self.init_list_view()
+            
         elif splits[0] == 'duplicate_name':
             self.show_error("用户名已存在，请修改")
             self.lineEdit.setEnabled(True)
@@ -129,12 +142,13 @@ class Window(QMainWindow, Ui_MainWindow):
         self.label_res.setText(msg)
         if msg == "抓取":
             if not self.isController:
-                self.get_ctrl()  # 按下获取控制按钮
+                self.get_ctrl()
                 self.switch_ctrl()
             else:
                 self.switch_ctrl()
                 self.get_ctrl()
             return
+            
         if self.isControlling:
             if self.isTarget:
                 self.textBrowser.append("控制本机：" + msg)
@@ -150,18 +164,26 @@ class Window(QMainWindow, Ui_MainWindow):
         self.textBrowser.moveCursor(self.textBrowser.textCursor().End)
 
     def flash_img(self, image, ratio):
-        size = (int(self.label_img.width()), int(self.label_img.width() * ratio))
-        shrink = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
-        # cv2.imshow('img', shrink)
-        shrink = cv2.cvtColor(shrink, cv2.COLOR_BGR2RGB)
-        self.QtImg = QtGui.QImage(shrink.data, shrink.shape[1],
-                                  shrink.shape[0], shrink.shape[1] * 3,
-                                  QtGui.QImage.Format_RGB888)
-        self.label_img.setPixmap(QtGui.QPixmap.fromImage(self.QtImg))
+        """更新摄像头画面"""
+        try:
+            if image is None:
+                return
+            size = (int(self.label_img.width()), int(self.label_img.width() * ratio))
+            if size[0] <= 0 or size[1] <= 0:
+                return
+            shrink = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
+            shrink = cv2.cvtColor(shrink, cv2.COLOR_BGR2RGB)
+            self.QtImg = QtGui.QImage(
+                shrink.data, shrink.shape[1], shrink.shape[0], 
+                shrink.shape[1] * 3, QtGui.QImage.Format_RGB888
+            )
+            self.label_img.setPixmap(QtGui.QPixmap.fromImage(self.QtImg))
+        except Exception as e:
+            print(f"更新画面失败: {e}")
 
     def switch(self):
         if self.eventRunning.isSet():
-            self.label_img.setText("Hellow\nWorld")
+            self.label_img.setText("Hello\nWorld")
             self.btn_start.setText("开启识别")
             self.eventRunning.clear()
         else:
@@ -172,13 +194,17 @@ class Window(QMainWindow, Ui_MainWindow):
         QMessageBox.information(self, "错误", msg)
 
     def init_list_view(self):
-        slm = QStringListModel()  # 创建model
-        slm.setStringList(self.member_list)  # 将数据设置到model
-        self.listView.setModel(slm)  # 绑定 listView 和 model
-        self.listView.clicked.connect(self.clicked_list)  # listview 的点击事件
+        slm = QStringListModel()
+        slm.setStringList(self.member_list)
+        self.listView.setModel(slm)
+        # 只绑定一次信号，避免重复绑定
+        if not self._list_view_connected:
+            self.listView.clicked.connect(self.clicked_list)
+            self._list_view_connected = True
 
     def clicked_list(self, q_model_index):
-        self.target = self.member_list[q_model_index.row()]
+        if 0 <= q_model_index.row() < len(self.member_list):
+            self.target = self.member_list[q_model_index.row()]
 
     def show_tutorials_win(self):
         self.switch()

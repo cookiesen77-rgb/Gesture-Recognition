@@ -9,7 +9,6 @@ from client import Client
 
 class App:
     def __init__(self):
-        super().__init__()
         self.qapp = QApplication(sys.argv)
         self.win = Window(self)
         self.win.show()
@@ -17,9 +16,13 @@ class App:
         self.client = Client(self)
 
     def run(self):
-
         self.client.start()
         sys.exit(self.qapp.exec_())
+
+    def cleanup(self):
+        """清理资源"""
+        self.identify.break_loop()
+        self.client.stop_ping()
 
 
 if __name__ == '__main__':
