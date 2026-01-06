@@ -1,0 +1,25 @@
+# Gesture Recognition Project Dependencies
+# Recommended Python version: 3.8 - 3.10
+
+# GUI Framework
+PyQt5>=5.15.0
+
+# Deep Learning
+torch>=1.9.0
+torchvision>=0.10.0
+
+# Computer Vision & Hand Detection
+opencv-python>=4.5.0
+mediapipe>=0.8.9
+
+# Numerical Computing
+numpy>=1.19.0
+
+# Input Simulation
+# Windows:
+pyuserinput>=0.1.11; sys_platform == 'win32'
+pywin32>=300; sys_platform == 'win32'
+
+# macOS/Linux:
+pynput>=1.7.0; sys_platform != 'win32'
+
