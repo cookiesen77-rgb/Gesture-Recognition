@@ -21,53 +21,65 @@ class Identify:
     def init_camera(self):
         """初始化摄像头，返回是否成功"""
         print("正在初始化摄像头...")
-        
-        # 尝试不同的摄像头索引和后端
-        backends = []
-        
-        if platform.system() == 'Windows':
-            backends = [
-                (0, cv2.CAP_DSHOW),
-                (0, cv2.CAP_MSMF),
-                (0, cv2.CAP_ANY),
-            ]
-        elif platform.system() == 'Darwin':  # macOS
-            backends = [
-                (0, cv2.CAP_AVFOUNDATION),
-                (0, cv2.CAP_ANY),
-                (1, cv2.CAP_ANY),
-            ]
-        else:  # Linux
-            backends = [
-                (0, cv2.CAP_V4L2),
-                (0, cv2.CAP_ANY),
-                ('/dev/video0', cv2.CAP_ANY),
-            ]
-        
-        for camera_id, backend in backends:
-            try:
-                print(f"尝试打开摄像头: {camera_id}, 后端: {backend}")
-                self.cap = cv2.VideoCapture(camera_id, backend)
-                
-                if self.cap.isOpened():
-                    # 尝试读取一帧来验证
-                    ret, frame = self.cap.read()
-                    if ret and frame is not None:
-                        print(f"摄像头初始化成功！分辨率: {frame.shape[1]}x{frame.shape[0]}")
-                        return True
-                    else:
-                        self.cap.release()
-                        print("摄像头打开但无法读取帧")
-                else:
-                    print("摄像头无法打开")
-                    
-            except Exception as e:
-                print(f"尝试失败: {e}")
-                if self.cap:
-                    self.cap.release()
-        
+        camera_ids = self._get_camera_ids()
+        backend_candidates = self._get_backend_candidates()
+
+        for camera_id in camera_ids:
+            for backend in backend_candidates:
+                if self._try_open_camera(camera_id, backend):
+                    return True
+
         print("所有摄像头初始化尝试均失败")
         return False
+
+    def _get_camera_ids(self):
+        env_ids = os.getenv("CAMERA_INDEX")
+        if env_ids:
+            try:
+                return [int(item.strip()) for item in env_ids.split(",") if item.strip() != ""]
+            except ValueError:
+                print("CAMERA_INDEX 无法解析，使用默认摄像头索引")
+        if platform.system() == 'Linux':
+            return [0, 1, 2, '/dev/video0']
+        return [0, 1, 2]
+
+    def _get_backend_candidates(self):
+        if platform.system() == 'Windows':
+            return [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY, None]
+        if platform.system() == 'Darwin':
+            return [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY, None]
+        return [cv2.CAP_V4L2, cv2.CAP_ANY, None]
+
+    def _try_open_camera(self, camera_id, backend):
+        try:
+            backend_label = "default" if backend is None else backend
+            print(f"尝试打开摄像头: {camera_id}, 后端: {backend_label}")
+            if backend is None:
+                self.cap = cv2.VideoCapture(camera_id)
+            else:
+                self.cap = cv2.VideoCapture(camera_id, backend)
+
+            if not self.cap.isOpened():
+                print("摄像头无法打开")
+                self.cap.release()
+                return False
+
+            for _ in range(5):
+                ret, frame = self.cap.read()
+                if ret and frame is not None:
+                    print(f"摄像头初始化成功！分辨率: {frame.shape[1]}x{frame.shape[0]}")
+                    return True
+                time.sleep(0.1)
+
+            self.cap.release()
+            print("摄像头打开但无法读取帧")
+            return False
+
+        except Exception as e:
+            print(f"尝试失败: {e}")
+            if self.cap:
+                self.cap.release()
+            return False
 
     def run(self):
         # 初始化摄像头
